@@ -136,10 +136,10 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 		Analyze the equation or expression in this image and return the answer according to the given rules:
 		Please provide the answer in a JSON format only, no additional text.`
 
-	// Create parts for the prompt
+	// Create parts for the prompt - FIX: Use "png" instead of "image/png"
 	prompt := []genai.Part{
 		genai.Text(promptText),
-		genai.ImageData("image/png", imageData),
+		genai.ImageData("png", imageData), // FIXED: Changed from "image/png" to just "png"
 	}
 
 	// Increase timeout to 120 seconds
