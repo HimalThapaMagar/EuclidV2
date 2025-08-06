@@ -1,9 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	"image/png"
 	"log"
 	"os"
 	"time"
@@ -40,14 +45,14 @@ func NewGeminiClient() (*GeminiClient, error) {
 		return nil, fmt.Errorf("failed to create genai client: %v", err)
 	}
 
-	// Create a generative model with configuration similar to your Flutter implementation
-	model := client.GenerativeModel("gemini-1.5-flash")
+	// Create a generative model with the newest model
+	model := client.GenerativeModel("gemini-2.5-flash")
 
 	// Convert values to float32/int32 pointers
 	temp := float32(1.0)
 	topK := int32(64)
 	topP := float32(0.95)
-	maxTokens := int32(8192)
+	maxTokens := int32(4096) // Reduced from 8192 to help with processing time
 
 	// Create a new GenerationConfig directly
 	config := genai.GenerationConfig{
@@ -66,8 +71,55 @@ func NewGeminiClient() (*GeminiClient, error) {
 	}, nil
 }
 
+// optimizeImage reduces the image size if needed to improve API response time
+func optimizeImage(imgData []byte) ([]byte, error) {
+	// Read image
+	img, format, err := image.Decode(bytes.NewReader(imgData))
+	if err != nil {
+		return imgData, nil // Return original if we can't optimize
+	}
+
+	// If the image is already small enough, return the original
+	if len(imgData) < 1000000 { // Less than ~1MB
+		return imgData, nil
+	}
+
+	// Create a buffer to store the optimized image
+	var buf bytes.Buffer
+
+	// For PNG, use a higher compression level
+	if format == "png" {
+		encoder := png.Encoder{
+			CompressionLevel: png.BestCompression,
+		}
+		if err := encoder.Encode(&buf, img); err != nil {
+			return imgData, nil
+		}
+	} else {
+		// For other formats, convert to JPEG with 85% quality
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+			return imgData, nil
+		}
+	}
+
+	// If the optimized image is smaller, return it
+	if buf.Len() < len(imgData) {
+		log.Printf("Image optimized from %d bytes to %d bytes", len(imgData), buf.Len())
+		return buf.Bytes(), nil
+	}
+
+	// Otherwise return the original
+	return imgData, nil
+}
+
 // ProcessDrawing sends the drawing to Gemini and returns the calculated results
 func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
+	// Try to optimize the image
+	optimizedImage, err := optimizeImage(imageData)
+	if err == nil {
+		imageData = optimizedImage
+	}
+
 	// Create the prompt similar to your Flutter implementation
 	promptText := `You have been given an image with some mathematical expressions, equations, or graphical problems, and you need to solve them. Note: Use the PEMDAS rule for solving mathematical expressions. PEMDAS stands for the Priority Order: Parentheses, Exponents, Multiplication and Division (from left to right), Addition and Subtraction (from left to right). Parentheses have the highest priority, followed by Exponents, then Multiplication and Division, and lastly Addition and Subtraction. For example:
 		Q. 2 + 3 * 4
@@ -90,13 +142,48 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 		genai.ImageData("image/png", imageData),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Increase timeout to 120 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	// Generate content using the Gemini model
-	resp, err := g.model.GenerateContent(ctx, prompt...)
+	// Add retry logic
+	maxRetries := 3
+	var resp *genai.GenerateContentResponse
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Generate content using the Gemini model
+		resp, err = g.model.GenerateContent(ctx, prompt...)
+		if err == nil {
+			break // Success!
+		}
+
+		lastErr = err
+		log.Printf("API attempt %d failed: %v", attempt, err)
+
+		// If model doesn't exist, try falling back to gemini-1.5-flash
+		if attempt == 1 && (err.Error() == "model not found" || err.Error() == "model is not supported") {
+			log.Printf("Model gemini-2.5-flash not found. Falling back to gemini-1.5-flash...")
+			g.model = g.client.GenerativeModel("gemini-1.5-flash")
+			continue
+		}
+
+		// Don't retry if we've already used up too much time
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout exceeded after %d attempts: %v", attempt, lastErr)
+		default:
+			// Wait before retrying (exponential backoff)
+			if attempt < maxRetries {
+				backoffTime := time.Duration(attempt*2) * time.Second
+				time.Sleep(backoffTime)
+				log.Printf("Retrying after %v...", backoffTime)
+			}
+		}
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("error generating content: %v", err)
+		return nil, fmt.Errorf("error generating content after %d attempts: %v", maxRetries, lastErr)
 	}
 
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {

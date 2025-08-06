@@ -141,13 +141,19 @@ func handleCalculation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process the image using Gemini
+	log.Printf("Starting Gemini processing with the latest model (this may take up to 2 minutes)...")
 	results, err := client.ProcessDrawing(imageData)
 	if err != nil {
 		log.Printf("Error processing drawing: %v", err)
-		http.Error(w, "Error processing drawing: "+err.Error(), http.StatusInternalServerError)
+
+		// Provide a more user-friendly error message
+		if err.Error() == "context deadline exceeded" || err.Error() == "timeout exceeded" {
+			http.Error(w, "The calculation is taking too long. Please try with a simpler equation or a clearer image.", http.StatusGatewayTimeout)
+		} else {
+			http.Error(w, "Error processing drawing: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
-
 	// Create response based on the results
 	var response interface{}
 	if len(results) == 1 {
