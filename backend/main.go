@@ -7,14 +7,32 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/HimalThapaMagar/EuclidV2/api"
 )
 
+// Global Gemini client
+var (
+	geminiClient     *api.GeminiClient
+	geminiClientOnce sync.Once
+	geminiClientErr  error
+)
+
+// CalculationResponse represents the response sent back to the client
 type CalculationResponse struct {
-	Expression string  `json:"expression"`
-	Result     float64 `json:"result"`
+	Expression string      `json:"expression"`
+	Result     interface{} `json:"result"`
 }
+
 func main() {
+	// Initialize Gemini client
+	getGeminiClient()
+	if geminiClientErr != nil {
+		log.Fatalf("Failed to initialize Gemini client: %v", geminiClientErr)
+	}
+
 	// Define endpoint for calculation
 	http.HandleFunc("/calculate", handleCalculation)
 
@@ -22,8 +40,19 @@ func main() {
 	http.HandleFunc("/", enableCORS)
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Health check received at %s", time.Now().Format("2006-01-02 15:04:05"))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+
+	// Simple test endpoint for JSON
+	http.HandleFunc("/test-json", func(w http.ResponseWriter, r *http.Request) {
+		enableCORS(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CalculationResponse{
+			Expression: "test",
+			Result:     123,
+		})
 	})
 
 	// Get port from environment variable (required for Render)
@@ -32,8 +61,18 @@ func main() {
 		port = "8080" // Default for local development
 	}
 	
-	fmt.Printf("Starting server at port %s at %s\n", port, time.Now().Format("2006-01-02 15:04:05"))
+	log.Printf("Starting server at port %s at %s", port, time.Now().Format("2006-01-02 15:04:05"))
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, nil))
+}
+
+// Lazy initialization of Gemini client
+func getGeminiClient() (*api.GeminiClient, error) {
+	geminiClientOnce.Do(func() {
+		client, err := api.NewGeminiClient()
+		geminiClient = client
+		geminiClientErr = err
+	})
+	return geminiClient, geminiClientErr
 }
 
 func enableCORS(w http.ResponseWriter, r *http.Request) {
@@ -48,75 +87,86 @@ func enableCORS(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCalculation(w http.ResponseWriter, r *http.Request) {
-    // Enable CORS
-    enableCORS(w, r)
+	// Enable CORS
+	enableCORS(w, r)
 
-    if r.Method != http.MethodPost {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    // Parse multipart form with 10MB max memory
-    err := r.ParseMultipartForm(10 << 20)
-    if err != nil {
-        log.Printf("Error parsing form: %v", err)
-        http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
-        return
-    }
+	// Parse multipart form with 10MB max memory
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		log.Printf("Error parsing form: %v", err)
+		http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // Get the file from the request
-    file, handler, err := r.FormFile("drawing")
-    if err != nil {
-        log.Printf("Error retrieving file: %v", err)
-        http.Error(w, "Error retrieving file: "+err.Error(), http.StatusBadRequest)
-        return
-    }
-    defer file.Close()
+	// Get the file from the request
+	file, handler, err := r.FormFile("drawing")
+	if err != nil {
+		log.Printf("Error retrieving file: %v", err)
+		http.Error(w, "Error retrieving file: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
 
-    log.Printf("Received file: %s, size: %d bytes, type: %s",
-        handler.Filename,
-        handler.Size,
-        handler.Header.Get("Content-Type"))
+	log.Printf("Received file: %s, size: %d bytes, type: %s",
+		handler.Filename,
+		handler.Size,
+		handler.Header.Get("Content-Type"))
 
-    // Create a temporary file to store the uploaded image
-    tempFile, err := os.CreateTemp("", "drawing-*.png")
-    if err != nil {
-        log.Printf("Error creating temporary file: %v", err)
-        http.Error(w, "Error creating temporary file: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer tempFile.Close()
-    defer os.Remove(tempFile.Name()) // Clean up temp file after processing
+	// Read the file into memory
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Error reading file: %v", err)
+		http.Error(w, "Error reading file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    // Copy uploaded file to the temporary file
-    _, err = io.Copy(tempFile, file)
-    if err != nil {
-        log.Printf("Error saving file: %v", err)
-        http.Error(w, "Error saving file: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	// Get Gemini client
+	client, err := getGeminiClient()
+	if err != nil {
+		log.Printf("Error getting Gemini client: %v", err)
+		http.Error(w, "Server error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    log.Printf("Saved file temporarily at: %s", tempFile.Name())
+	// Process the image using Gemini
+	results, err := client.ProcessDrawing(imageData)
+	if err != nil {
+		log.Printf("Error processing drawing: %v", err)
+		http.Error(w, "Error processing drawing: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    // Prepare response
-    response := CalculationResponse{
-        Expression: "2+2",
-        Result:     4,
-    }
+	// Create response based on the results
+	var response interface{}
+	if len(results) == 1 {
+		// Single result
+		response = CalculationResponse{
+			Expression: results[0].Expression,
+			Result:     results[0].Result,
+		}
+	} else {
+		// Multiple results
+		response = results
+	}
 
-    // Set content type before writing response
-    w.Header().Set("Content-Type", "application/json")
-    
-    // Log that we're about to send the response
-    log.Printf("Sending response: %+v", response)
-    
-    // Encode and send JSON response
-    err = json.NewEncoder(w).Encode(response)
-    if err != nil {
-        log.Printf("Error encoding JSON response: %v", err)
-        http.Error(w, "Error encoding response", http.StatusInternalServerError)
-        return
-    }
-    
-    log.Printf("Response sent successfully")
+	// Set content type before writing response
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Log that we're about to send the response
+	log.Printf("Sending response: %+v", response)
+	
+	// Encode and send JSON response
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		log.Printf("Error encoding JSON response: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+		return
+	}
+	
+	log.Printf("Response sent successfully")
 }
