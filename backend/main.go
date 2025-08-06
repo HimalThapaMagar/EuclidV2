@@ -9,8 +9,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"github.com/HimalThapaMagar/EuclidV2/api"
 )
 
 // Global Gemini client
