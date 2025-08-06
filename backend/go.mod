@@ -6,6 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/google/generative-ai-go v0.5.0
+	github.com/joho/godotenv v1.5.1
 	google.golang.org/api v0.149.0
 )
 

@@ -8,6 +8,9 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/joho/godotenv"
+	"main.go/api"
 )
 
 // Global Gemini client
@@ -24,6 +27,13 @@ type CalculationResponse struct {
 }
 
 func main() {
+	if _, err := os.Stat(".env"); err == nil {
+		if err := godotenv.Load(); err != nil {
+			log.Printf("Warning: Error loading .env file: %v", err)
+		} else {
+			log.Println("Loaded environment from .env file")
+		}
+	}
 	// Initialize Gemini client
 	getGeminiClient()
 	if geminiClientErr != nil {
@@ -57,7 +67,7 @@ func main() {
 	if port == "" {
 		port = "8080" // Default for local development
 	}
-	
+
 	log.Printf("Starting server at port %s at %s", port, time.Now().Format("2006-01-02 15:04:05"))
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, nil))
 }
@@ -153,10 +163,10 @@ func handleCalculation(w http.ResponseWriter, r *http.Request) {
 
 	// Set content type before writing response
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Log that we're about to send the response
 	log.Printf("Sending response: %+v", response)
-	
+
 	// Encode and send JSON response
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
@@ -164,6 +174,6 @@ func handleCalculation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 		return
 	}
-	
+
 	log.Printf("Response sent successfully")
 }

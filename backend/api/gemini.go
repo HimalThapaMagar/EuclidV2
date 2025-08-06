@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -43,12 +42,23 @@ func NewGeminiClient() (*GeminiClient, error) {
 
 	// Create a generative model with configuration similar to your Flutter implementation
 	model := client.GenerativeModel("gemini-1.5-flash")
-	model.GenerationConfig = &genai.GenerationConfig{
-		Temperature:     1.0,
-		TopK:            64,
-		TopP:            0.95,
-		MaxOutputTokens: 8192,
+
+	// Convert values to float32/int32 pointers
+	temp := float32(1.0)
+	topK := int32(64)
+	topP := float32(0.95)
+	maxTokens := int32(8192)
+
+	// Create a new GenerationConfig directly
+	config := genai.GenerationConfig{
+		Temperature:     &temp,
+		TopK:            &topK,
+		TopP:            &topP,
+		MaxOutputTokens: &maxTokens,
 	}
+
+	// Assign the configuration directly
+	model.GenerationConfig = config
 
 	return &GeminiClient{
 		client: client,
@@ -93,8 +103,19 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 		return nil, fmt.Errorf("no response from model")
 	}
 
-	// Extract the text response
-	responseText := resp.Candidates[0].Content.Parts[0].GetText()
+	// Extract the text response correctly
+	var responseText string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if textPart, ok := part.(genai.Text); ok {
+			responseText = string(textPart)
+			break
+		}
+	}
+
+	if responseText == "" {
+		return nil, fmt.Errorf("no text response found in model output")
+	}
+
 	log.Printf("Gemini response: %s", responseText)
 
 	// Parse the JSON response
@@ -103,7 +124,7 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 		// If it fails, try to find JSON in the text (in case model outputs additional text)
 		jsonStart := 0
 		jsonEnd := len(responseText)
-		
+
 		// Look for starting bracket
 		for i, char := range responseText {
 			if char == '[' {
@@ -111,7 +132,7 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 				break
 			}
 		}
-		
+
 		// Look for ending bracket (from the end)
 		for i := len(responseText) - 1; i >= 0; i-- {
 			if responseText[i] == ']' {
@@ -119,7 +140,7 @@ func (g *GeminiClient) ProcessDrawing(imageData []byte) ([]MathResult, error) {
 				break
 			}
 		}
-		
+
 		// Try parsing the extracted JSON portion
 		if jsonEnd > jsonStart {
 			extractedJSON := responseText[jsonStart:jsonEnd]
