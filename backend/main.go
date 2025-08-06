@@ -33,7 +33,7 @@ func main() {
 	}
 	
 	fmt.Printf("Starting server at port %s at %s\n", port, time.Now().Format("2006-01-02 15:04:05"))
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, nil))
 }
 
 func enableCORS(w http.ResponseWriter, r *http.Request) {
