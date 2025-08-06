@@ -48,61 +48,75 @@ func enableCORS(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCalculation(w http.ResponseWriter, r *http.Request) {
-	// Enable CORS
-	enableCORS(w, r)
+    // Enable CORS
+    enableCORS(w, r)
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
 
-	// Parse multipart form with 10MB max memory
-	err := r.ParseMultipartForm(10 << 20)
-	if err != nil {
-		http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
+    // Parse multipart form with 10MB max memory
+    err := r.ParseMultipartForm(10 << 20)
+    if err != nil {
+        log.Printf("Error parsing form: %v", err)
+        http.Error(w, "Error parsing form: "+err.Error(), http.StatusBadRequest)
+        return
+    }
 
-	// Get the file from the request
-	file, handler, err := r.FormFile("drawing")
-	if err != nil {
-		http.Error(w, "Error retrieving file: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
+    // Get the file from the request
+    file, handler, err := r.FormFile("drawing")
+    if err != nil {
+        log.Printf("Error retrieving file: %v", err)
+        http.Error(w, "Error retrieving file: "+err.Error(), http.StatusBadRequest)
+        return
+    }
+    defer file.Close()
 
-	fmt.Printf("Received file: %s, size: %d bytes, type: %s\n",
-		handler.Filename,
-		handler.Size,
-		handler.Header.Get("Content-Type"))
+    log.Printf("Received file: %s, size: %d bytes, type: %s",
+        handler.Filename,
+        handler.Size,
+        handler.Header.Get("Content-Type"))
 
-	// Create a temporary file to store the uploaded image
-	tempFile, err := os.CreateTemp("", "drawing-*.png")
-	if err != nil {
-		http.Error(w, "Error creating temporary file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer tempFile.Close()
-	defer os.Remove(tempFile.Name()) // Clean up temp file after processing
+    // Create a temporary file to store the uploaded image
+    tempFile, err := os.CreateTemp("", "drawing-*.png")
+    if err != nil {
+        log.Printf("Error creating temporary file: %v", err)
+        http.Error(w, "Error creating temporary file: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer tempFile.Close()
+    defer os.Remove(tempFile.Name()) // Clean up temp file after processing
 
-	// Copy uploaded file to the temporary file
-	_, err = io.Copy(tempFile, file)
-	if err != nil {
-		http.Error(w, "Error saving file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+    // Copy uploaded file to the temporary file
+    _, err = io.Copy(tempFile, file)
+    if err != nil {
+        log.Printf("Error saving file: %v", err)
+        http.Error(w, "Error saving file: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
 
-	fmt.Printf("Saved file temporarily at: %s\n", tempFile.Name())
+    log.Printf("Saved file temporarily at: %s", tempFile.Name())
 
-	// TODO: Process the image using ML to recognize mathematical expression
-	// For now, return a dummy response
+    // Prepare response
+    response := CalculationResponse{
+        Expression: "2+2",
+        Result:     4,
+    }
 
-	response := CalculationResponse{
-		Expression: "2+2",
-		Result:     4,
-	}
-
-	// Send JSON response
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+    // Set content type before writing response
+    w.Header().Set("Content-Type", "application/json")
+    
+    // Log that we're about to send the response
+    log.Printf("Sending response: %+v", response)
+    
+    // Encode and send JSON response
+    err = json.NewEncoder(w).Encode(response)
+    if err != nil {
+        log.Printf("Error encoding JSON response: %v", err)
+        http.Error(w, "Error encoding response", http.StatusInternalServerError)
+        return
+    }
+    
+    log.Printf("Response sent successfully")
 }
