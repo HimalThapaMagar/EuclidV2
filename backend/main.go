@@ -14,7 +14,6 @@ type CalculationResponse struct {
 	Expression string  `json:"expression"`
 	Result     float64 `json:"result"`
 }
-
 func main() {
 	// Define endpoint for calculation
 	http.HandleFunc("/calculate", handleCalculation)
@@ -27,8 +26,12 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	// Start the server
-	port := "8080"
+	// Get port from environment variable (required for Render)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Default for local development
+	}
+	
 	fmt.Printf("Starting server at port %s at %s\n", port, time.Now().Format("2006-01-02 15:04:05"))
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
