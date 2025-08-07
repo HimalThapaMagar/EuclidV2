@@ -4,6 +4,10 @@
 
 EuclidV2 is an interactive mathematical expression solver that allows users to draw mathematical equations and receive instant solutions. Powered by Google's Gemini AI, this app can recognize and solve handwritten math problems, equations, and even interpret graphical math concepts.
 
+## Why tho?
+
+You know how we used to develop calculator app when we learn something new, well this is basically that but packed with AI AI AI as recent trends indicate, So AI AI AI. haha.
+
 ## ✨ Features
 
 - **Handwriting Recognition**: Solve math problems by drawing them directly on the canvas
@@ -88,4 +92,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Until next time, See ya !!!
 
